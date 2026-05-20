@@ -19,7 +19,47 @@ const RULES: Rule[] = [
   { id:"expulsion", checklistNo:"고등-1", category:"학생선도·징계", title:"고등학교 퇴학처분 관련 절차 확인", basis:"법령 필수", required:["퇴학","재심"], schoolLevels:["고등학교"], sources:[src.checklist,src.law,src.decree,src.training], revised:"제○조【퇴학처분 절차】 고등학교에서 퇴학처분을 하는 경우 학생 및 보호자에게 사전 통지와 의견진술 기회를 부여하고, 진로상담, 재심 절차, 학습권 보호 방안을 안내한다.", reason:"퇴학처분은 고등학교에 한정되는 중대한 징계이므로 별도의 절차 보장이 필요합니다." }
 ];
 function n(t:string){return t.replace(/\s+/g," ").trim();}
-function findArticle(text:string, keys:string[]){const re=/(제\s*\d+\s*조[^\n]*)([\s\S]*?)(?=\n\s*제\s*\d+\s*조|$)/g;const arts=[...text.matchAll(re)].map(m=>n(`${m[1]} ${m[2]}`));const f=arts.find(a=>keys.some(k=>a.includes(k))); if(f) return f.slice(0,1000); const i=keys.map(k=>text.indexOf(k)).find(i=>i!==-1); return i!==undefined&&i>=0?n(text.slice(Math.max(0,i-250),i+750)):"관련 조항을 자동으로 찾지 못했습니다. 담당자 확인이 필요합니다.";}
+function findArticle(text: string, keywords: string[]) {
+  const cleaned = text
+    .replace(/\r/g, "\n")
+    .replace(/\s+/g, " ")
+    .replace(/제\s*(\d+)\s*조/g, "\n제$1조")
+    .trim();
+
+  const articlePattern = /(제\s*\d+\s*조[^제]*?)(?=\n제\s*\d+\s*조|$)/g;
+
+  const articles = [...cleaned.matchAll(articlePattern)]
+    .map((match) => normalize(match[1]))
+    .filter((article) => article.length > 10);
+
+  const keywordMatchedArticle = articles.find((article) =>
+    keywords.some((keyword) => article.includes(keyword))
+  );
+
+  if (keywordMatchedArticle) {
+    return keywordMatchedArticle.slice(0, 1200);
+  }
+
+  const fallbackKeyword = keywords.find((keyword) => cleaned.includes(keyword));
+
+  if (fallbackKeyword) {
+    const index = cleaned.indexOf(fallbackKeyword);
+    const before = cleaned.lastIndexOf("제", index);
+    const after = cleaned.indexOf("제", index + fallbackKeyword.length);
+
+    if (before >= 0) {
+      return normalize(
+        cleaned.slice(before, after > before ? after : index + 800)
+      ).slice(0, 1200);
+    }
+
+    return normalize(
+      cleaned.slice(Math.max(0, index - 250), index + 800)
+    ).slice(0, 1200);
+  }
+
+  return "관련 조항을 자동으로 찾지 못했습니다. 본문 전체에서 담당자 확인이 필요합니다.";
+}
 function status(text:string, r:Rule): ReviewStatus {const req=r.required.every(k=>text.includes(k)); const old=r.outdated?.some(k=>text.includes(k))??false; if(req&&!old)return "적정"; if(req&&old)return "확인 필요"; return "보완 필요";}
 function sum(items:ReviewItem[]){return{total:items.length,needsRevision:items.filter(i=>i.status==="보완 필요").length,needsReview:items.filter(i=>i.status==="확인 필요").length,adequate:items.filter(i=>i.status==="적정").length,notApplicable:items.filter(i=>i.status==="해당 없음").length};}
 export function analyzeRegulation(p:{schoolName:string;schoolLevel:SchoolLevel;regulationText:string;checklistText?:string;regulationFileName?:string;checklistFileName?:string;}):AnalysisResult{const text=p.regulationText||"";const rules=RULES.filter(r=>!r.schoolLevels||r.schoolLevels.includes(p.schoolLevel));const items: ReviewItem[] = rules.map(r=>{const s: ReviewStatus = text.length<50?"확인 필요":status(text,r);return{id:r.id,checklistNo:r.checklistNo,status:s,category:r.category,title:r.title,article:"자동 추출",basis:r.basis,sources:r.sources,comment:s==="적정"?"관련 구조가 확인됩니다. 최종 문구는 학교 절차에 따라 확인하세요.":s==="확인 필요"?"관련 표현은 있으나 최신 용어 또는 절차와 혼재되어 확인이 필요합니다.":"체크리스트 및 근거 자료 기준으로 보완이 필요한 항목입니다.",current:text.length<50?"규정 본문이 충분히 입력되지 않았습니다.":findArticle(text,[...r.required,...(r.outdated??[])]),revised:r.revised,reason:r.reason};});return{schoolName:p.schoolName||"학교명 미입력",schoolLevel:p.schoolLevel,generatedAt:new Date().toISOString(),regulationFileName:p.regulationFileName,checklistFileName:p.checklistFileName,extractedTextLength:text.length,summary:sum(items),items,notice:"본 결과는 교육청 체크리스트, 연수자료, 초·중등교육법, 초·중등교육법 시행령, 교원의 학생생활지도에 관한 고시를 근거로 한 AI 검토 보조 결과입니다. 최종 개정안은 학교 절차에 따라 확정해야 합니다."};}
